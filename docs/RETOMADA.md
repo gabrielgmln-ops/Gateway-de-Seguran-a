@@ -26,7 +26,9 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
 | 5 | Testes, cobertura, CI (gofmt, vet, govulncheck, matriz Go 1.26/1.27) | `5024007` |
 | Ajuste | Portas configuráveis (8083), `.gitattributes` LF, notas para Windows | `3d815b3` |
 | Docs | Nota de retomada | `6fed510` |
-| Docs | Repositório publicado no GitHub | último commit |
+| Docs | Repositório publicado no GitHub | `4f079b6` |
+| Fix | `golang.org/x/text` v0.43.0 (vulnerabilidade apontada pelo govulncheck) e actions v7 | `d50332b` |
+| Docs | Esta atualização da nota | último commit |
 
 ## Decisões tomadas
 
@@ -44,8 +46,11 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
 
 1. ~~**GitHub**~~ ✅ publicado em 28/10/2026 em https://github.com/gabrielgmln-ops/Gateway-de-Seguran-a (branch `main`). O bundle `gateway-seguranca-backup.bundle` fica só como cópia de segurança.
 2. **Docker não testado:** a nuvem não tinha daemon Docker. Rodar `docker compose up --build -d` no PC e conferir se gateway, redis e postgres ficam `healthy`. Os pontos de maior risco são o Redis com `user: redis` + `read_only` e o Postgres com volume.
-3. **govulncheck não rodou:** o proxy da nuvem bloqueou `vuln.go.dev`. Ele vai rodar no primeiro CI.
-4. **Primeiro CI no GitHub Actions** ainda não executado.
+3. **CI no GitHub Actions:** o 1º run (`4f079b6`) passou nos testes (Go 1.26 e 1.27), mas falhou no
+   govulncheck por uma vulnerabilidade em `golang.org/x/text` v0.29.0 alcançável via pgx. O job docker foi pulado.
+   Corrigido em `d50332b` (x/text v0.43.0 e actions v7). **Conferir se o 2º run ficou todo verde**, inclusive o
+   build Docker, que ainda nunca rodou: `gh run list --repo gabrielgmln-ops/Gateway-de-Seguran-a`.
+4. Se as actions v7 quebrarem algo no CI, voltar para a última versão que funcionar e registrar o motivo.
 5. **Autoria dos 6 primeiros commits:** estão como `Claude <noreply@anthropic.com>`; só os últimos têm o autor Gabriel. O push já foi feito, então padronizar agora reescreve o histórico e exige `git push --force-with-lease` (decisão do senhor):
    `git rebase -r --root --exec "git commit --amend --no-edit --reset-author"` (com `user.name`/`user.email` já configurados).
 6. **Integração com os serviços reais** (próximo passo de valor): apontar `LEDGER_URL`, `PIX_URL` e `ANTIFRAUDE_URL` para os projetos reais, por exemplo `http://host.docker.internal:8081`.
