@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"gateway-seguranca/internal/auth"
+	"gateway-seguranca/internal/authz"
 	"gateway-seguranca/internal/config"
 	"gateway-seguranca/internal/httpx"
 	"gateway-seguranca/internal/proxy"
@@ -75,7 +76,8 @@ func NewRouter(d Deps) http.Handler {
 
 		// r.Group cria um grupo de rotas que compartilha middlewares, sem mudar o prefixo.
 		r.Group(func(g chi.Router) {
-			g.Use(auth.RequireBearer(d.Tokens, d.Reporter)) // autenticação obrigatória
+			g.Use(auth.RequireBearer(d.Tokens, d.Reporter))       // 1º autenticação: quem é você?
+			g.Use(authz.RequireServiceScope(up.Name, d.Reporter)) // 2º autorização: pode fazer isto?
 			// Mount atende "/ledger" e "/ledger/*". StripPrefix remove "/ledger" antes de
 			// encaminhar, então GET /ledger/contas chega ao Ledger como GET /contas.
 			g.Mount(prefix, http.StripPrefix(prefix, handler))
