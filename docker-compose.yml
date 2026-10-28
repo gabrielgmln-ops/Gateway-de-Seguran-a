@@ -1,10 +1,12 @@
 # Caminho: docker-compose.yml
 #
-# Somente o gateway publica uma porta para o host. Os serviços internos ficam
-# apenas na rede "interna", inalcançáveis de fora, de modo que todo acesso passa
-# obrigatoriamente pelo gateway.
+# Somente o gateway publica uma porta para o host. Ledger, Pix, Antifraude,
+# Redis e PostgreSQL ficam apenas na rede "interna", inalcançáveis de fora,
+# de modo que todo acesso passa obrigatoriamente pelo gateway.
+#
+# Pré-requisito: ./scripts/gerar-env.sh (cria o .env com os segredos).
 
-# Endurecimento comum a todos os contêineres (âncora YAML reaproveitada abaixo).
+# Endurecimento comum (âncora YAML reaproveitada abaixo).
 x-hardening: &hardening
   read_only: true                 # sistema de arquivos somente leitura
   cap_drop: [ALL]                 # remove todas as capabilities do Linux
@@ -29,30 +31,21 @@ services:
       PIX_URL: "http://pix:9000"
       ANTIFRAUDE_URL: "http://antifraude:9000"
       REDIS_ADDR: "redis:6379"
+      # sslmode=disable só é aceitável porque o banco está numa rede interna isolada.
+      # Em produção, use sslmode=verify-full com certificado.
+      DATABASE_URL: "postgres://gateway:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/seguranca?sslmode=disable"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/gateway", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     networks: [interna]
     depends_on:
       ledger: {condition: service_started}
       pix: {condition: service_started}
       antifraude: {condition: service_started}
       redis: {condition: service_healthy}
-
-  redis:
-    <<: *hardening
-    image: redis:7.4-alpine
-    # A senha vem do .env (interpolação "${...}" do Compose). "$$" escapa o "$"
-    # para que a variável seja expandida pelo shell do contêiner, e não pelo Compose.
-    # --save '' e --appendonly no: os baldes são dados efêmeros, sem gravação em disco.
-    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --save '' --appendonly no"]
-    environment:
-      REDIS_PASSWORD: "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}"
-      REDISCLI_AUTH: "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}"
-    tmpfs: [/data]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    networks: [interna]
+      postgres: {condition: service_healthy}
 
   ledger:
     <<: *hardening
@@ -78,6 +71,48 @@ services:
       SERVICE_NAME: antifraude
     networks: [interna]
 
+  redis:
+    <<: *hardening
+    image: redis:7.4-alpine
+    user: redis                   # roda sem root
+    # A senha vem do .env (interpolação "${...}" do Compose). "$$" escapa o "$"
+    # para que a variável seja expandida pelo shell do contêiner, e não pelo Compose.
+    # --save '' e --appendonly no: os baldes são dados efêmeros, sem gravação em disco.
+    entrypoint: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --save '' --appendonly no"]
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}"
+      REDISCLI_AUTH: "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}"
+    tmpfs: [/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [interna]
+
+  postgres:
+    image: postgres:16-alpine
+    # O entrypoint oficial precisa de root na inicialização (ajusta permissões e depois
+    # troca para o usuário postgres), por isso aqui não se usa read_only nem cap_drop.
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}"
+      POSTGRES_DB: seguranca
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway -d seguranca"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [interna]
+
 networks:
   interna:
     driver: bridge
+
+volumes:
+  pgdata:

@@ -20,6 +20,7 @@ import (
 	"gateway-seguranca/internal/authz"
 	"gateway-seguranca/internal/config"
 	"gateway-seguranca/internal/httpx"
+	"gateway-seguranca/internal/ipblock"
 	"gateway-seguranca/internal/proxy"
 	"gateway-seguranca/internal/ratelimit"
 	"gateway-seguranca/internal/seclog"
@@ -40,6 +41,10 @@ type Deps struct {
 	OAuthLimiter  ratelimit.Limiter
 	ClientLimiter ratelimit.Limiter
 
+	// Bloqueio de IP e resolução do IP real (Etapa 4).
+	Blocker  *ipblock.Blocker
+	ClientIP func(*http.Request) string // nil = usa o IP da conexão TCP
+
 	// ReadyChecks: verificações de prontidão (ex.: "redis" -> ping). Usadas no /readyz.
 	ReadyChecks map[string]func(context.Context) error
 }
@@ -52,15 +57,25 @@ var probePaths = map[string]bool{"/healthz": true, "/readyz": true}
 func NewRouter(d Deps) http.Handler {
 	r := chi.NewRouter()
 
+	resolveIP := d.ClientIP
+	if resolveIP == nil {
+		resolveIP = RemoteIP
+	}
+
 	// A ORDEM importa, como decorators empilhados: o primeiro Use é a camada mais externa.
-	r.Use(RequestID)                                                              // 1. todo log e todo erro passam a ter um ID
-	r.Use(ClientIP(RemoteIP))                                                     // 2. IP real do cliente no contexto
-	r.Use(AccessLog(d.Logger))                                                    // 3. registra tudo, inclusive requisições rejeitadas abaixo
-	r.Use(middleware.Recoverer)                                                   // 4. um panic vira 500 em vez de derrubar o processo
-	r.Use(SecurityHeaders)                                                        // 5. cabeçalhos de segurança em todas as respostas
-	r.Use(SkipPaths(probePaths, rateLimit(d, d.IPLimiter, ratelimit.ByClientIP))) // 6. limite global por IP
-	r.Use(RejectSuspiciousPath(d.Reporter))                                       // 7. bloqueia "..", "//" e barras codificadas
-	r.Use(LimitBody(d.Config.MaxBodyBytes))                                       // 8. limita o tamanho do corpo
+	r.Use(RequestID)            // 1. todo log e todo erro passam a ter um ID
+	r.Use(ClientIP(resolveIP))  // 2. IP real do cliente no contexto
+	r.Use(AccessLog(d.Logger))  // 3. registra tudo, inclusive requisições rejeitadas abaixo
+	r.Use(middleware.Recoverer) // 4. um panic vira 500 em vez de derrubar o processo
+	r.Use(SecurityHeaders)      // 5. cabeçalhos de segurança em todas as respostas
+	if d.Blocker != nil {
+		// 6. IP bloqueado é barrado antes de gastar qualquer outro recurso.
+		r.Use(SkipPaths(probePaths, ipblock.Middleware(d.Blocker, d.Config.RedisFailOpen, d.Reporter, d.Logger)))
+	}
+	// 7. limite global por IP
+	r.Use(SkipPaths(probePaths, rateLimit(d, d.IPLimiter, ratelimit.ByClientIP)))
+	r.Use(RejectSuspiciousPath(d.Reporter)) // 8. bloqueia "..", "//" e barras codificadas
+	r.Use(LimitBody(d.Config.MaxBodyBytes)) // 9. limita o tamanho do corpo
 
 	// Respostas 404/405 em JSON, sem revelar quais rotas existem (OWASP API8/API9).
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {

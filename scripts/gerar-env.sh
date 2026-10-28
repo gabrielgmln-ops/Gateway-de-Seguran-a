@@ -25,6 +25,7 @@ SEC_PIX=$(rand)
 SEC_ANTIFRAUDE=$(rand)
 SEC_LEITURA=$(rand)
 SEC_VALIDADOR=$(rand)
+PG_PASS=$(rand)
 
 CLIENTS=$(cat <<JSON
 [{"client_id":"app-ledger","secret_sha256":"$(sha "$SEC_LEDGER")","scopes":["ledger:read","ledger:write"]},{"client_id":"app-pix","secret_sha256":"$(sha "$SEC_PIX")","scopes":["pix:read","pix:write"]},{"client_id":"app-antifraude","secret_sha256":"$(sha "$SEC_ANTIFRAUDE")","scopes":["antifraude:read","antifraude:write"]},{"client_id":"app-leitura","secret_sha256":"$(sha "$SEC_LEITURA")","scopes":["ledger:read","pix:read"]},{"client_id":"servico-validador","secret_sha256":"$(sha "$SEC_VALIDADOR")","scopes":["token:introspect"]}]
@@ -57,6 +58,13 @@ RATE_LIMIT_OAUTH_CAPACITY=10
 RATE_LIMIT_OAUTH_REFILL_PER_SEC=0.5
 RATE_LIMIT_CLIENT_CAPACITY=20
 RATE_LIMIT_CLIENT_REFILL_PER_SEC=10
+IPBLOCK_MAX_FAILURES=5
+IPBLOCK_WINDOW=10m
+IPBLOCK_DURATION=15m
+TRUSTED_PROXIES=
+POSTGRES_PASSWORD=${PG_PASS}
+DATABASE_URL=postgres://gateway:${PG_PASS}@localhost:5432/seguranca?sslmode=disable
+SECLOG_BUFFER=1000
 ENV
 
 cat > .clientes-demo.env <<ENV

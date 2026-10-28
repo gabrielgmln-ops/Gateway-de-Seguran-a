@@ -51,6 +51,14 @@ type Config struct {
 	RateIP        RateLimit // limite global por IP, aplicado antes de qualquer coisa
 	RateOAuth     RateLimit // limite por IP no /oauth/* (anti força bruta de credenciais)
 	RateClient    RateLimit // limite por client_id autenticado nas rotas de serviço
+
+	// --- Bloqueio de IP e logs de segurança (Etapa 4) ---
+	IPBlockMaxFailures int           // falhas na janela até bloquear
+	IPBlockWindow      time.Duration // janela de contagem das falhas
+	IPBlockDuration    time.Duration // por quanto tempo o IP fica bloqueado
+	TrustedProxies     string        // CIDRs dos proxies confiáveis, ex.: "10.0.0.0/8,172.16.0.0/12"
+	DatabaseURL        string        // PostgreSQL; vazio = eventos só no stdout
+	SecLogBuffer       int           // tamanho da fila de eventos para o PostgreSQL
 }
 
 // RateLimit descreve um token bucket: Capacity = rajada máxima; Refill = fichas por segundo.
@@ -161,6 +169,24 @@ func Load() (*Config, error) {
 	}
 	if cfg.RateClient, err = loadRate("RATE_LIMIT_CLIENT", 20, 10); err != nil {
 		return nil, err
+	}
+
+	// --- Bloqueio de IP ---
+	if cfg.IPBlockMaxFailures, err = strconv.Atoi(getEnv("IPBLOCK_MAX_FAILURES", "5")); err != nil || cfg.IPBlockMaxFailures < 1 {
+		return nil, fmt.Errorf("IPBLOCK_MAX_FAILURES inválido")
+	}
+	if cfg.IPBlockWindow, err = time.ParseDuration(getEnv("IPBLOCK_WINDOW", "10m")); err != nil || cfg.IPBlockWindow <= 0 {
+		return nil, fmt.Errorf("IPBLOCK_WINDOW inválido")
+	}
+	if cfg.IPBlockDuration, err = time.ParseDuration(getEnv("IPBLOCK_DURATION", "15m")); err != nil || cfg.IPBlockDuration <= 0 {
+		return nil, fmt.Errorf("IPBLOCK_DURATION inválido")
+	}
+	cfg.TrustedProxies = os.Getenv("TRUSTED_PROXIES")
+
+	// --- Logs de segurança ---
+	cfg.DatabaseURL = os.Getenv("DATABASE_URL")
+	if cfg.SecLogBuffer, err = strconv.Atoi(getEnv("SECLOG_BUFFER", "1000")); err != nil || cfg.SecLogBuffer < 1 {
+		return nil, fmt.Errorf("SECLOG_BUFFER inválido")
 	}
 
 	return cfg, nil // "nil" é o equivalente ao None do Python

@@ -15,13 +15,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
 	"gateway-seguranca/internal/auth"
+	"gateway-seguranca/internal/clientip"
 	"gateway-seguranca/internal/config"
+	"gateway-seguranca/internal/ipblock"
 	"gateway-seguranca/internal/ratelimit"
 	"gateway-seguranca/internal/seclog"
 	"gateway-seguranca/internal/server"
@@ -31,6 +34,13 @@ func main() {
 	// slog é o logger estruturado da biblioteca padrão. O handler JSON gera uma
 	// linha JSON por evento, como o python-json-logger.
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// "gateway healthcheck": modo usado pelo healthcheck do Docker. A imagem
+	// distroless não tem curl nem shell, então o próprio binário faz a checagem.
+	// os.Args é o sys.argv do Python.
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck())
+	}
 
 	// run() concentra a lógica e devolve um erro; main() só decide o código de saída.
 	// Assim os "defer" de run() sempre executam (os.Exit pularia todos eles).
@@ -85,8 +95,39 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	// Por enquanto, eventos de segurança vão só para o stdout e não há bloqueio de IP.
-	monitor := seclog.NewMonitor(logger, nil, seclog.NewSlogSink(logger))
+	// --- Bloqueio de IP e IP real do cliente ---
+	blocker, err := ipblock.New(rdb, cfg.IPBlockMaxFailures, cfg.IPBlockWindow, cfg.IPBlockDuration)
+	if err != nil {
+		return err
+	}
+	ipResolver, err := clientip.New(cfg.TrustedProxies)
+	if err != nil {
+		return err
+	}
+
+	// --- Logs de segurança: sempre no stdout e, se configurado, também no PostgreSQL ---
+	readyChecks := map[string]func(context.Context) error{
+		"redis": func(ctx context.Context) error { return rdb.Ping(ctx).Err() },
+	}
+	sinks := []seclog.Sink{seclog.NewSlogSink(logger)}
+	var pgSink *seclog.PostgresSink
+	if cfg.DatabaseURL != "" {
+		err := waitFor("postgres", logger, func(ctx context.Context) error {
+			var e error
+			pgSink, e = seclog.NewPostgresSink(ctx, cfg.DatabaseURL, cfg.SecLogBuffer, logger)
+			return e
+		})
+		if err != nil {
+			return err
+		}
+		sinks = append(sinks, pgSink)
+		readyChecks["postgres"] = pgSink.Ping
+	} else {
+		logger.Warn("DATABASE_URL vazia: eventos de segurança apenas no stdout")
+	}
+
+	// O Monitor recebe o blocker: cada falha de segurança conta para o bloqueio do IP.
+	monitor := seclog.NewMonitor(logger, blocker, sinks...)
 
 	srv := &http.Server{
 		Addr: cfg.Addr,
@@ -100,9 +141,9 @@ func run(logger *slog.Logger) error {
 			IPLimiter:     ipLimiter,
 			OAuthLimiter:  oauthLimiter,
 			ClientLimiter: clientLimiter,
-			ReadyChecks: map[string]func(context.Context) error{
-				"redis": func(ctx context.Context) error { return rdb.Ping(ctx).Err() },
-			},
+			Blocker:       blocker,
+			ClientIP:      ipResolver.ClientIP, // um método pode ser passado como valor, como no Python
+			ReadyChecks:   readyChecks,
 		}),
 		// Timeouts do servidor: sem eles, um cliente que envia os bytes muito devagar
 		// (ataque Slowloris) prende conexões indefinidamente (OWASP API4).
@@ -146,6 +187,13 @@ func run(logger *slog.Logger) error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return err
 	}
+	// Só depois que o servidor parou é seguro fechar a fila de eventos.
+	if pgSink != nil {
+		pgSink.Close()
+		if n := pgSink.Dropped(); n > 0 {
+			logger.Warn("eventos de segurança descartados por fila cheia", "total", n)
+		}
+	}
 	logger.Info("gateway encerrado")
 	return nil
 }
@@ -167,4 +215,25 @@ func waitFor(name string, logger *slog.Logger, check func(context.Context) error
 		time.Sleep(time.Second)
 	}
 	return fmt.Errorf("%s indisponível após %d tentativas: %w", name, attempts, err)
+}
+
+// healthcheck consulta o /healthz local e devolve o código de saída (0 = saudável).
+func healthcheck() int {
+	addr := os.Getenv("GATEWAY_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	if strings.HasPrefix(addr, ":") { // ":8080" -> "127.0.0.1:8080"
+		addr = "127.0.0.1" + addr
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://" + addr + "/healthz")
+	if err != nil {
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 1
+	}
+	return 0
 }
