@@ -12,3 +12,4 @@ coverage.html
 # Editores
 .idea/
 .vscode/
+.clientes-demo.env

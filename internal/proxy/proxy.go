@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"gateway-seguranca/internal/auth"
 	"gateway-seguranca/internal/httpx"
 )
 
@@ -76,6 +77,25 @@ func New(name string, target *url.URL, timeout time.Duration, logger *slog.Logge
 				if hasAnyPrefix(key, internalHeaderPrefixes) {
 					pr.Out.Header.Del(key)
 				}
+			}
+
+			// O X-Forwarded-For passa a conter o IP real já resolvido pelo gateway
+			// (considerando os proxies confiáveis), e não o do último salto.
+			if ip := httpx.ClientIPFrom(pr.In.Context()); ip != "" {
+				pr.Out.Header.Set("X-Forwarded-For", ip)
+			}
+
+			// O token JWT NÃO segue para os serviços internos: o gateway já o validou.
+			// Se um serviço interno for comprometido, ele não terá tokens para reutilizar.
+			pr.Out.Header.Del("Authorization")
+
+			// Repassa a identidade validada em cabeçalhos que só o gateway pode definir.
+			// Os serviços usam X-Gateway-Client-ID para checar a posse do objeto
+			// (ex.: a conta pertence a este cliente?), a defesa contra BOLA (OWASP API1).
+			if claims := auth.ClaimsFrom(pr.In.Context()); claims != nil {
+				pr.Out.Header.Set("X-Gateway-Client-ID", claims.ClientID)
+				pr.Out.Header.Set("X-Gateway-Scopes", claims.Scope)
+				pr.Out.Header.Set("X-Gateway-Token-ID", claims.ID)
 			}
 
 			// Propaga o ID da requisição para correlacionar logs entre os serviços.

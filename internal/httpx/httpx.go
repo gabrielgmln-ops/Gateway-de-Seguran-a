@@ -18,7 +18,11 @@ import (
 // sinais de cancelamento ao longo de toda a cadeia de chamadas.
 type contextKey string
 
-const requestIDKey contextKey = "request_id"
+const (
+	requestIDKey contextKey = "request_id"
+	clientIPKey  contextKey = "client_ip"
+	clientIDKey  contextKey = "client_id"
+)
 
 // SecurityHeaders são os cabeçalhos de segurança aplicados a TODAS as respostas
 // (OWASP API8: Security Misconfiguration).
@@ -65,6 +69,33 @@ func RequestIDFrom(ctx context.Context) string {
 	// ".(string)" é uma "type assertion": verifica se o valor é mesmo uma string.
 	// Parecido com "isinstance(v, str)", só que já convertendo o valor.
 	if id, ok := ctx.Value(requestIDKey).(string); ok {
+		return id
+	}
+	return ""
+}
+
+// WithClientIP guarda no contexto o IP real do cliente, calculado uma única vez
+// no início da requisição e reaproveitado por logs, rate limit e bloqueio.
+func WithClientIP(ctx context.Context, ip string) context.Context {
+	return context.WithValue(ctx, clientIPKey, ip)
+}
+
+// ClientIPFrom lê o IP do cliente do contexto ("" se não existir).
+func ClientIPFrom(ctx context.Context) string {
+	if ip, ok := ctx.Value(clientIPKey).(string); ok {
+		return ip
+	}
+	return ""
+}
+
+// WithClientID guarda no contexto o client_id OAuth2 já autenticado.
+func WithClientID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, clientIDKey, id)
+}
+
+// ClientIDFrom lê o client_id autenticado do contexto ("" se anônimo).
+func ClientIDFrom(ctx context.Context) string {
+	if id, ok := ctx.Value(clientIDKey).(string); ok {
 		return id
 	}
 	return ""

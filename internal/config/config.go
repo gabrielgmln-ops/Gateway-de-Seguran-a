@@ -35,7 +35,18 @@ type Config struct {
 	MaxBodyBytes    int64         // tamanho máximo do corpo da requisição (OWASP API4)
 	UpstreamTimeout time.Duration // tempo máximo esperando o serviço interno responder
 	Upstreams       []Upstream    // "[]Upstream" é um slice: parecido com list[Upstream]
+
+	// --- Autenticação (Etapa 1) ---
+	JWTSecret        []byte        // chave HMAC do JWT; []byte é como o tipo bytes do Python
+	JWTIssuer        string        // claim "iss"
+	JWTAudience      string        // claim "aud"
+	JWTTTL           time.Duration // validade do access token
+	OAuthClientsJSON string        // cadastro de clientes OAuth2 (JSON), lido de variável de ambiente
 }
+
+// minJWTSecretBytes: 32 bytes (256 bits) é o mínimo recomendado para HS256.
+// Segredos curtos podem ser quebrados por força bruta offline (OWASP API2).
+const minJWTSecretBytes = 32
 
 // Load lê as variáveis de ambiente e valida tudo logo na inicialização
 // ("fail fast"): melhor o gateway não subir do que subir mal configurado (OWASP API8).
@@ -88,6 +99,29 @@ func Load() (*Config, error) {
 		}
 		// append() é o equivalente a lista.append(x), mas devolve o slice novo.
 		cfg.Upstreams = append(cfg.Upstreams, Upstream{Name: s.name, URL: u})
+	}
+
+	// --- Autenticação ---
+	secret := os.Getenv("JWT_SECRET")
+	if len(secret) < minJWTSecretBytes {
+		// Nunca imprima o segredo na mensagem de erro, só o problema.
+		return nil, fmt.Errorf("JWT_SECRET é obrigatório e precisa ter pelo menos %d bytes", minJWTSecretBytes)
+	}
+	cfg.JWTSecret = []byte(secret) // conversão de string para bytes, como secret.encode()
+	cfg.JWTIssuer = getEnv("JWT_ISSUER", "gateway-seguranca")
+	cfg.JWTAudience = getEnv("JWT_AUDIENCE", "servicos-internos")
+
+	ttlRaw := getEnv("JWT_TTL", "15m")
+	ttl, err := time.ParseDuration(ttlRaw)
+	// Tokens de vida curta reduzem o estrago caso um token vaze.
+	if err != nil || ttl <= 0 || ttl > time.Hour {
+		return nil, fmt.Errorf("JWT_TTL inválido (use entre 1s e 1h): %q", ttlRaw)
+	}
+	cfg.JWTTTL = ttl
+
+	cfg.OAuthClientsJSON = os.Getenv("OAUTH_CLIENTS")
+	if cfg.OAuthClientsJSON == "" {
+		return nil, fmt.Errorf("variável de ambiente OAUTH_CLIENTS é obrigatória")
 	}
 
 	return cfg, nil // "nil" é o equivalente ao None do Python

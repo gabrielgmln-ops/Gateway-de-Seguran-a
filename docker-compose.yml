@@ -19,6 +19,10 @@ services:
     image: gateway-seguranca:local
     ports:
       - "8080:8080"
+    # Segredos (JWT_SECRET, OAUTH_CLIENTS...) vêm do .env, gerado por scripts/gerar-env.sh.
+    env_file: .env
+    # "environment" tem prioridade sobre o env_file: dentro do Compose, os
+    # serviços são acessados pelo nome na rede interna, e não por localhost.
     environment:
       GATEWAY_ADDR: ":8080"
       LEDGER_URL: "http://ledger:9000"

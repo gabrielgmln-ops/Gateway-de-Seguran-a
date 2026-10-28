@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"gateway-seguranca/internal/httpx"
+	"gateway-seguranca/internal/seclog"
 )
 
 // RequestID gera um ID aleatório para CADA requisição.
@@ -42,6 +44,27 @@ func newRequestID() string {
 		return "sem-id"
 	}
 	return hex.EncodeToString(b)
+}
+
+// ClientIP descobre o IP real do cliente uma única vez e o guarda no contexto.
+// "resolve" é uma função recebida como parâmetro (funções são valores em Go,
+// como no Python), o que permite trocar a estratégia sem mudar o middleware.
+func ClientIP(resolve func(*http.Request) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(httpx.WithClientIP(r.Context(), resolve(r))))
+		})
+	}
+}
+
+// RemoteIP usa só o endereço da conexão TCP, que não pode ser falsificado
+// pelo cliente (ao contrário de cabeçalhos como X-Forwarded-For).
+func RemoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // AccessLog registra cada requisição em JSON estruturado (base para os logs
@@ -68,7 +91,7 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				"status", status,
 				"bytes", ww.BytesWritten(),
 				"duration_ms", time.Since(start).Milliseconds(),
-				"remote_addr", r.RemoteAddr,
+				"client_ip", httpx.ClientIPFrom(r.Context()),
 				"user_agent", r.UserAgent(),
 			)
 		})
@@ -88,14 +111,17 @@ func SecurityHeaders(next http.Handler) http.Handler {
 // RejectSuspiciousPath bloqueia caminhos com travessia de diretório ("..") ou
 // barras codificadas. Sem isso, "/ledger/../admin" poderia burlar as regras
 // de autorização por rota das próximas etapas (OWASP API5).
-func RejectSuspiciousPath(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isSuspiciousPath(r.URL.Path, r.URL.EscapedPath()) {
-			httpx.WriteError(w, r, http.StatusBadRequest, "invalid_path", "caminho da requisição inválido")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+func RejectSuspiciousPath(reporter seclog.Reporter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isSuspiciousPath(r.URL.Path, r.URL.EscapedPath()) {
+				reporter.Report(r, seclog.EventPathRejected, http.StatusBadRequest, "caminho suspeito")
+				httpx.WriteError(w, r, http.StatusBadRequest, "invalid_path", "caminho da requisição inválido")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func isSuspiciousPath(decoded, escaped string) bool {

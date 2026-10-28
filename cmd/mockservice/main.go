@@ -43,9 +43,13 @@ func main() {
 			"request_id":      r.Header.Get("X-Request-ID"),
 			"x_forwarded_for": r.Header.Get("X-Forwarded-For"),
 			"gateway_service": r.Header.Get("X-Gateway-Service"),
-			// Prova de que o cabeçalho forjado pelo cliente NÃO chegou aqui:
-			"x_gateway_scopes_recebido": r.Header.Get("X-Gateway-Scopes"),
-			"dados_sinteticos":          syntheticData(name),
+			// Identidade repassada pelo gateway. Se o cliente tentar forjar estes
+			// cabeçalhos, o gateway os apaga antes de definir os valores verdadeiros.
+			"gateway_client_id": r.Header.Get("X-Gateway-Client-ID"),
+			"gateway_scopes":    r.Header.Get("X-Gateway-Scopes"),
+			// Prova de que o token NÃO chega aos serviços internos (deve vir vazio):
+			"authorization_recebido": r.Header.Get("Authorization"),
+			"dados_sinteticos":       syntheticData(name),
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	})
