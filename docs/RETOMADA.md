@@ -25,7 +25,8 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
 | 4 | Bloqueio de IP por falhas, IP real com proxies confiáveis, log no PostgreSQL | `e0c14a3` |
 | 5 | Testes, cobertura, CI (gofmt, vet, govulncheck, matriz Go 1.26/1.27) | `5024007` |
 | Ajuste | Portas configuráveis (8083), `.gitattributes` LF, notas para Windows | `3d815b3` |
-| Docs | Esta nota de retomada | último commit |
+| Docs | Nota de retomada | `6fed510` |
+| Docs | Repositório publicado no GitHub | último commit |
 
 ## Decisões tomadas
 
@@ -41,11 +42,11 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
 
 ## Pendências
 
-1. **GitHub:** criar o repositório vazio `gabrielgmln-ops/gateway-seguranca` e fazer o push. Até lá, o código existe só no bundle `gateway-seguranca-backup.bundle`.
+1. ~~**GitHub**~~ ✅ publicado em 28/10/2026 em https://github.com/gabrielgmln-ops/Gateway-de-Seguran-a (branch `main`). O bundle `gateway-seguranca-backup.bundle` fica só como cópia de segurança.
 2. **Docker não testado:** a nuvem não tinha daemon Docker. Rodar `docker compose up --build -d` no PC e conferir se gateway, redis e postgres ficam `healthy`. Os pontos de maior risco são o Redis com `user: redis` + `read_only` e o Postgres com volume.
 3. **govulncheck não rodou:** o proxy da nuvem bloqueou `vuln.go.dev`. Ele vai rodar no primeiro CI.
 4. **Primeiro CI no GitHub Actions** ainda não executado.
-5. **Autoria dos 6 primeiros commits:** estão como `Claude <noreply@anthropic.com>`; só os dois últimos têm o autor Gabriel. Se o senhor quiser padronizar, reescreva a autoria **antes** do primeiro push (depois exigiria force push):
+5. **Autoria dos 6 primeiros commits:** estão como `Claude <noreply@anthropic.com>`; só os últimos têm o autor Gabriel. O push já foi feito, então padronizar agora reescreve o histórico e exige `git push --force-with-lease` (decisão do senhor):
    `git rebase -r --root --exec "git commit --amend --no-edit --reset-author"` (com `user.name`/`user.email` já configurados).
 6. **Integração com os serviços reais** (próximo passo de valor): apontar `LEDGER_URL`, `PIX_URL` e `ANTIFRAUDE_URL` para os projetos reais, por exemplo `http://host.docker.internal:8081`.
    - **Atenção:** a Ledger API recebeu HTTP Basic na Operação Cofre, e o gateway remove o `Authorization` antes de encaminhar. Será preciso decidir como o gateway se autentica em cada serviço, por exemplo com credenciais de serviço por variável de ambiente (`LEDGER_USUARIO` e `LEDGER_SENHA`) injetadas pelo proxy.
@@ -55,16 +56,23 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
 
 ## O que o senhor precisa fornecer
 
-- O repositório vazio `gabrielgmln-ops/gateway-seguranca` no GitHub (sem README, sem licença), ou autorização para eu criá-lo pelo `gh`.
 - Docker Desktop aberto e Go ≥ 1.26 (`go version`); se o Go for mais antigo, ele baixa a toolchain sozinho.
 - Git Bash para rodar `./scripts/gerar-env.sh`, que gera um `.env` novo: os segredos da nuvem **não** foram salvos.
 - Para a integração: as portas e as credenciais de teste da Ledger, do Pix e do Antifraude no PC.
 
-## Como restaurar a partir do bundle
+## Como restaurar o código
+
+Pelo GitHub (preferido):
+
+```bash
+git clone https://github.com/gabrielgmln-ops/Gateway-de-Seguran-a.git gateway-seguranca
+```
+
+Ou, sem internet, a partir do bundle (tem os 8 primeiros commits; falta só esta atualização da nota):
 
 ```bash
 git clone gateway-seguranca-backup.bundle gateway-seguranca
 cd gateway-seguranca
-git remote remove origin
-git log --oneline   # 8 commits, o último é "docs: nota de retomada da sessão"
+git remote set-url origin https://github.com/gabrielgmln-ops/Gateway-de-Seguran-a.git
+git pull origin main
 ```
