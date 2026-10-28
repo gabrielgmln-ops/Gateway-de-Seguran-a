@@ -1,0 +1,7 @@
+# Caminho: .dockerignore
+# Evita enviar segredos e lixo para o contexto de build do Docker
+.env
+.git
+bin/
+coverage.out
+coverage.html

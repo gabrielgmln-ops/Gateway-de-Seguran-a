@@ -1,0 +1,56 @@
+# Caminho: docker-compose.yml
+#
+# Somente o gateway publica uma porta para o host. Os serviços internos ficam
+# apenas na rede "interna", inalcançáveis de fora, de modo que todo acesso passa
+# obrigatoriamente pelo gateway.
+
+# Endurecimento comum a todos os contêineres (âncora YAML reaproveitada abaixo).
+x-hardening: &hardening
+  read_only: true                 # sistema de arquivos somente leitura
+  cap_drop: [ALL]                 # remove todas as capabilities do Linux
+  security_opt:
+    - no-new-privileges:true      # impede escalada de privilégio (setuid etc.)
+  restart: unless-stopped
+
+services:
+  gateway:
+    <<: *hardening
+    build: .
+    image: gateway-seguranca:local
+    ports:
+      - "8080:8080"
+    environment:
+      GATEWAY_ADDR: ":8080"
+      LEDGER_URL: "http://ledger:9000"
+      PIX_URL: "http://pix:9000"
+      ANTIFRAUDE_URL: "http://antifraude:9000"
+    networks: [interna]
+    depends_on: [ledger, pix, antifraude]
+
+  ledger:
+    <<: *hardening
+    image: gateway-seguranca:local
+    entrypoint: ["/usr/local/bin/mockservice"]
+    environment:
+      SERVICE_NAME: ledger
+    networks: [interna]
+
+  pix:
+    <<: *hardening
+    image: gateway-seguranca:local
+    entrypoint: ["/usr/local/bin/mockservice"]
+    environment:
+      SERVICE_NAME: pix
+    networks: [interna]
+
+  antifraude:
+    <<: *hardening
+    image: gateway-seguranca:local
+    entrypoint: ["/usr/local/bin/mockservice"]
+    environment:
+      SERVICE_NAME: antifraude
+    networks: [interna]
+
+networks:
+  interna:
+    driver: bridge

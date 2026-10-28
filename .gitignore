@@ -1,0 +1,14 @@
+# Caminho: .gitignore
+# Binários e artefatos de build
+/bin/
+/gateway
+/mockservice
+*.exe
+# Cobertura de testes
+coverage.out
+coverage.html
+# Segredos locais: NUNCA versionar
+.env
+# Editores
+.idea/
+.vscode/
