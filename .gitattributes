@@ -1,0 +1,7 @@
+# Caminho: .gitattributes
+# Força fim de linha LF em todos os arquivos de texto, inclusive no Windows.
+# Sem isso, o Git do Windows pode converter scripts .sh para CRLF e o bash
+# falha com erros como "set: pipefail\r: invalid option".
+* text=auto eol=lf
+*.bundle binary
+*.png binary

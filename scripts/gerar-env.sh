@@ -37,7 +37,9 @@ umask 077
 
 cat > .env <<ENV
 # Gerado por scripts/gerar-env.sh em $(date -u +%Y-%m-%dT%H:%M:%SZ). NÃO VERSIONAR.
-GATEWAY_ADDR=:8080
+GATEWAY_ADDR=:8083
+# Porta publicada no host pelo docker compose (8083 evita conflito com Ledger/Pix no PC)
+GATEWAY_HOST_PORT=8083
 LEDGER_URL=http://localhost:9001
 PIX_URL=http://localhost:9002
 ANTIFRAUDE_URL=http://localhost:9003

@@ -51,8 +51,14 @@ Só o gateway publica porta. Os serviços internos, o Redis e o PostgreSQL ficam
 ./scripts/gerar-env.sh        # cria .env e .clientes-demo.env (permissão 600, fora do git)
 docker compose up --build -d
 docker compose ps             # gateway, redis e postgres devem aparecer como "healthy"
-curl -s localhost:8080/readyz # {"postgres":"up","redis":"up"}
+curl -s localhost:8083/readyz # {"postgres":"up","redis":"up"}
 ```
+
+> O `.env` gerado publica o gateway na porta **8083** do host (`GATEWAY_HOST_PORT`),
+> porque 8080 a 8082 costumam estar ocupadas por outros projetos. Nos exemplos abaixo,
+> troque `8080` por `8083` se estiver usando o Compose.
+> No Windows, rode os scripts `.sh` pelo **Git Bash** (já traz `openssl` e `sha256sum`).
+> O `make` é opcional: cada alvo do `Makefile` é só um atalho para os comandos `go`/`docker`.
 
 ### Demonstração rápida
 ```bash

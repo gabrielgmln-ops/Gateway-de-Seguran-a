@@ -20,7 +20,9 @@ services:
     build: .
     image: gateway-seguranca:local
     ports:
-      - "8080:8080"
+      # Porta do host configurável: no PC Windows do autor, 8080 a 8082 já estão
+      # ocupadas (AgentService, Ledger API, Pix Simulado). Use GATEWAY_HOST_PORT=8083 no .env.
+      - "${GATEWAY_HOST_PORT:-8080}:8080"
     # Segredos (JWT_SECRET, OAUTH_CLIENTS...) vêm do .env, gerado por scripts/gerar-env.sh.
     env_file: .env
     # "environment" tem prioridade sobre o env_file: dentro do Compose, os
