@@ -160,3 +160,17 @@ func LimitBody(maxBytes int64) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// SkipPaths aplica o middleware "mw" a todas as rotas, EXCETO às listadas.
+func SkipPaths(paths map[string]bool, mw func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		wrapped := mw(next) // monta a versão "com middleware" uma única vez
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if paths[r.URL.Path] { // ler chave ausente de um map devolve o valor zero (false)
+				next.ServeHTTP(w, r)
+				return
+			}
+			wrapped.ServeHTTP(w, r)
+		})
+	}
+}

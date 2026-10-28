@@ -28,8 +28,31 @@ services:
       LEDGER_URL: "http://ledger:9000"
       PIX_URL: "http://pix:9000"
       ANTIFRAUDE_URL: "http://antifraude:9000"
+      REDIS_ADDR: "redis:6379"
     networks: [interna]
-    depends_on: [ledger, pix, antifraude]
+    depends_on:
+      ledger: {condition: service_started}
+      pix: {condition: service_started}
+      antifraude: {condition: service_started}
+      redis: {condition: service_healthy}
+
+  redis:
+    <<: *hardening
+    image: redis:7.4-alpine
+    # A senha vem do .env (interpolação "${...}" do Compose). "$$" escapa o "$"
+    # para que a variável seja expandida pelo shell do contêiner, e não pelo Compose.
+    # --save '' e --appendonly no: os baldes são dados efêmeros, sem gravação em disco.
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --save '' --appendonly no"]
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}"
+      REDISCLI_AUTH: "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}"
+    tmpfs: [/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [interna]
 
   ledger:
     <<: *hardening

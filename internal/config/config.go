@@ -42,6 +42,21 @@ type Config struct {
 	JWTAudience      string        // claim "aud"
 	JWTTTL           time.Duration // validade do access token
 	OAuthClientsJSON string        // cadastro de clientes OAuth2 (JSON), lido de variável de ambiente
+
+	// --- Redis e rate limiting (Etapa 3) ---
+	RedisAddr     string
+	RedisPassword string
+	RedisDB       int
+	RedisFailOpen bool      // false = se o Redis cair, o gateway recusa as requisições (mais seguro)
+	RateIP        RateLimit // limite global por IP, aplicado antes de qualquer coisa
+	RateOAuth     RateLimit // limite por IP no /oauth/* (anti força bruta de credenciais)
+	RateClient    RateLimit // limite por client_id autenticado nas rotas de serviço
+}
+
+// RateLimit descreve um token bucket: Capacity = rajada máxima; Refill = fichas por segundo.
+type RateLimit struct {
+	Capacity int64
+	Refill   float64
 }
 
 // minJWTSecretBytes: 32 bytes (256 bits) é o mínimo recomendado para HS256.
@@ -124,7 +139,46 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("variável de ambiente OAUTH_CLIENTS é obrigatória")
 	}
 
+	// --- Redis ---
+	cfg.RedisAddr = os.Getenv("REDIS_ADDR")
+	if cfg.RedisAddr == "" {
+		return nil, fmt.Errorf("variável de ambiente REDIS_ADDR é obrigatória (ex.: localhost:6379)")
+	}
+	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
+	if cfg.RedisDB, err = strconv.Atoi(getEnv("REDIS_DB", "0")); err != nil || cfg.RedisDB < 0 {
+		return nil, fmt.Errorf("REDIS_DB inválido")
+	}
+	if cfg.RedisFailOpen, err = strconv.ParseBool(getEnv("REDIS_FAIL_OPEN", "false")); err != nil {
+		return nil, fmt.Errorf("REDIS_FAIL_OPEN deve ser true ou false")
+	}
+
+	// Os limites padrão são exemplos razoáveis; ajuste conforme a carga real.
+	if cfg.RateIP, err = loadRate("RATE_LIMIT_IP", 100, 50); err != nil {
+		return nil, err
+	}
+	if cfg.RateOAuth, err = loadRate("RATE_LIMIT_OAUTH", 10, 0.5); err != nil {
+		return nil, err
+	}
+	if cfg.RateClient, err = loadRate("RATE_LIMIT_CLIENT", 20, 10); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil // "nil" é o equivalente ao None do Python
+}
+
+// loadRate lê <prefixo>_CAPACITY e <prefixo>_REFILL_PER_SEC.
+func loadRate(prefix string, defCapacity int64, defRefill float64) (RateLimit, error) {
+	capRaw := getEnv(prefix+"_CAPACITY", strconv.FormatInt(defCapacity, 10))
+	capacity, err := strconv.ParseInt(capRaw, 10, 64)
+	if err != nil || capacity < 1 {
+		return RateLimit{}, fmt.Errorf("%s_CAPACITY inválido: %q", prefix, capRaw)
+	}
+	refillRaw := getEnv(prefix+"_REFILL_PER_SEC", strconv.FormatFloat(defRefill, 'f', -1, 64))
+	refill, err := strconv.ParseFloat(refillRaw, 64)
+	if err != nil || refill <= 0 {
+		return RateLimit{}, fmt.Errorf("%s_REFILL_PER_SEC inválido: %q", prefix, refillRaw)
+	}
+	return RateLimit{Capacity: capacity, Refill: refill}, nil
 }
 
 // parseUpstreamURL valida o endereço de um serviço interno.

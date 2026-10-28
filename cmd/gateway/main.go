@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,8 +18,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"gateway-seguranca/internal/auth"
 	"gateway-seguranca/internal/config"
+	"gateway-seguranca/internal/ratelimit"
 	"gateway-seguranca/internal/seclog"
 	"gateway-seguranca/internal/server"
 )
@@ -51,6 +55,36 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	// --- Redis ---
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.RedisAddr,
+		Password: cfg.RedisPassword, // senha vem do ambiente, nunca do código
+		DB:       cfg.RedisDB,
+		// Timeouts curtos: o Redis está na mesma rede, e esperar muito por ele
+		// só deixaria as requisições presas.
+		DialTimeout:  2 * time.Second,
+		ReadTimeout:  500 * time.Millisecond,
+		WriteTimeout: 500 * time.Millisecond,
+		PoolSize:     50,
+	})
+	defer rdb.Close()
+	if err := waitFor("redis", logger, func(ctx context.Context) error { return rdb.Ping(ctx).Err() }); err != nil {
+		return err
+	}
+
+	ipLimiter, err := ratelimit.NewRedisLimiter(rdb, "rl:global", cfg.RateIP.Capacity, cfg.RateIP.Refill)
+	if err != nil {
+		return err
+	}
+	oauthLimiter, err := ratelimit.NewRedisLimiter(rdb, "rl:oauth", cfg.RateOAuth.Capacity, cfg.RateOAuth.Refill)
+	if err != nil {
+		return err
+	}
+	clientLimiter, err := ratelimit.NewRedisLimiter(rdb, "rl:svc", cfg.RateClient.Capacity, cfg.RateClient.Refill)
+	if err != nil {
+		return err
+	}
+
 	// Por enquanto, eventos de segurança vão só para o stdout e não há bloqueio de IP.
 	monitor := seclog.NewMonitor(logger, nil, seclog.NewSlogSink(logger))
 
@@ -62,6 +96,13 @@ func run(logger *slog.Logger) error {
 			Tokens:   tokens,
 			Clients:  clients,
 			Reporter: monitor,
+
+			IPLimiter:     ipLimiter,
+			OAuthLimiter:  oauthLimiter,
+			ClientLimiter: clientLimiter,
+			ReadyChecks: map[string]func(context.Context) error{
+				"redis": func(ctx context.Context) error { return rdb.Ping(ctx).Err() },
+			},
 		}),
 		// Timeouts do servidor: sem eles, um cliente que envia os bytes muito devagar
 		// (ataque Slowloris) prende conexões indefinidamente (OWASP API4).
@@ -107,4 +148,23 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("gateway encerrado")
 	return nil
+}
+
+// waitFor tenta a verificação algumas vezes antes de desistir. Na subida do
+// Docker Compose, o Redis e o PostgreSQL podem levar alguns segundos para aceitar conexões.
+func waitFor(name string, logger *slog.Logger, check func(context.Context) error) error {
+	const attempts = 10
+	var err error
+	for i := 1; i <= attempts; i++ { // o "for" clássico de três partes, como em C
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err = check(ctx)
+		cancel()
+		if err == nil {
+			logger.Info("dependência disponível", "dependency", name)
+			return nil
+		}
+		logger.Warn("aguardando dependência", "dependency", name, "tentativa", i, "error", err.Error())
+		time.Sleep(time.Second)
+	}
+	return fmt.Errorf("%s indisponível após %d tentativas: %w", name, attempts, err)
 }
