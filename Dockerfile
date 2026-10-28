@@ -8,7 +8,7 @@
 # Comparação com Python: em Python a imagem final precisaria do interpretador e
 # das dependências instaladas. Em Go, o binário compilado já é autossuficiente.
 
-FROM golang:1.24-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # Copia primeiro só os arquivos de dependências para aproveitar o cache de camadas
