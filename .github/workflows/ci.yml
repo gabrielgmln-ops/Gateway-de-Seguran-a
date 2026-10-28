@@ -29,8 +29,8 @@ jobs:
   qualidade:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: gofmt
@@ -65,8 +65,8 @@ jobs:
     env:
       TEST_DATABASE_URL: postgres://gateway:ci-somente-teste@localhost:5432/seguranca_teste?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
       - name: Testes com detector de corrida e cobertura
@@ -78,7 +78,7 @@ jobs:
           awk -v t="$total" -v m="$COVERAGE_MIN" 'BEGIN { exit !(t >= m) }' || { echo "Cobertura abaixo do mínimo"; exit 1; }
       - name: Relatório HTML de cobertura
         run: go tool cover -html=coverage.out -o coverage.html
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cobertura-go${{ matrix.go }}
           path: |
@@ -89,6 +89,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [qualidade, testes]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build da imagem
         run: docker build -t gateway-seguranca:ci .
