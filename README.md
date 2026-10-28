@@ -43,7 +43,9 @@ Só o gateway publica porta. Os serviços internos, o Redis e o PostgreSQL ficam
 
 ### Pré-requisitos
 - Go 1.26 ou superior (testado com 1.27.3)
-- Docker e Docker Compose v2
+- Docker e Docker Compose v2 (testado com Docker 29.8 no Windows 11)
+- Sem Go instalado, os testes rodam num contêiner:
+  `docker run --rm -v "$(pwd -W):/src" -w /src golang:1.27 go test -race ./...` (Git Bash)
 - `openssl` e `sha256sum` (para gerar o `.env`)
 
 ### Com Docker Compose
@@ -84,7 +86,7 @@ for i in 1 2 3 4 5; do curl -s -o /dev/null -w "%{http_code} " -u "app-pix:errad
 make eventos
 
 # Para liberar o IP antes de expirar (15 min):
-docker compose exec redis sh -c 'redis-cli --scan --pattern "ipblock:*" | xargs -r redis-cli del'
+docker compose exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan --pattern "ipblock:*" | xargs -r redis-cli -a "$REDIS_PASSWORD" --no-auth-warning del'
 ```
 
 ### Sem Docker (desenvolvimento)

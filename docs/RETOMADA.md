@@ -45,18 +45,21 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
 ## Pendências
 
 1. ~~**GitHub**~~ ✅ publicado em 28/10/2026 em https://github.com/gabrielgmln-ops/Gateway-de-Seguran-a (branch `main`). O bundle `gateway-seguranca-backup.bundle` fica só como cópia de segurança.
-2. **Docker não testado:** a nuvem não tinha daemon Docker. Rodar `docker compose up --build -d` no PC e conferir se gateway, redis e postgres ficam `healthy`. Os pontos de maior risco são o Redis com `user: redis` + `read_only` e o Postgres com volume.
-3. **CI no GitHub Actions:** o 1º run (`4f079b6`) passou nos testes (Go 1.26 e 1.27), mas falhou no
-   govulncheck por uma vulnerabilidade em `golang.org/x/text` v0.29.0 alcançável via pgx. O job docker foi pulado.
-   Corrigido em `d50332b` (x/text v0.43.0 e actions v7). **Conferir se o 2º run ficou todo verde**, inclusive o
-   build Docker, que ainda nunca rodou: `gh run list --repo gabrielgmln-ops/Gateway-de-Seguran-a`.
-4. Se as actions v7 quebrarem algo no CI, voltar para a última versão que funcionar e registrar o motivo.
+2. ~~**Docker não testado**~~ ✅ testado no PC em 28/10/2026 (Docker 29.8): gateway, redis e postgres `healthy`
+   sem mudar nada do endurecimento (Redis com `user: redis` + `read_only` funcionou). `/readyz` respondeu
+   `{"postgres":"up","redis":"up"}` na porta 8083 e a demonstração do README passou inteira (200, 403 de escopo,
+   introspecção ativa, bloqueio de IP na 5ª falha, eventos em `security_events`).
+   - O Go não está instalado no Windows; o `go test -race ./...` rodou verde no contêiner `golang:1.27`.
+   - O comando de desbloqueio de IP do README não passava a senha do Redis (`NOAUTH`); corrigido.
+3. ~~**CI no GitHub Actions**~~ ✅ o run do `e35cc86` ficou todo verde: qualidade (com govulncheck), testes 1.26 e
+   1.27 e build Docker. O run do `d50332b` aparece como cancelado porque o seguinte o substituiu.
+4. ~~Actions v7~~ ✅ funcionaram, nada a reverter.
 5. **Autoria dos 6 primeiros commits:** estão como `Claude <noreply@anthropic.com>`; só os últimos têm o autor Gabriel. O push já foi feito, então padronizar agora reescreve o histórico e exige `git push --force-with-lease` (decisão do senhor):
    `git rebase -r --root --exec "git commit --amend --no-edit --reset-author"` (com `user.name`/`user.email` já configurados).
 6. **Integração com os serviços reais** (próximo passo de valor): apontar `LEDGER_URL`, `PIX_URL` e `ANTIFRAUDE_URL` para os projetos reais, por exemplo `http://host.docker.internal:8081`.
    - **Atenção:** a Ledger API recebeu HTTP Basic na Operação Cofre, e o gateway remove o `Authorization` antes de encaminhar. Será preciso decidir como o gateway se autentica em cada serviço, por exemplo com credenciais de serviço por variável de ambiente (`LEDGER_USUARIO` e `LEDGER_SENHA`) injetadas pelo proxy.
    - Mapear os escopos para as rotas reais (`/api/v1/...`).
-7. **Vault:** acrescentar o projeto ao `MOC Projetos.md` (a nuvem não consegue editar arquivos existentes no Drive).
+7. ~~**Vault**~~ ✅ projeto (e o Pix Simulado, que faltava) no `MOC Projetos.md` em 28/10/2026.
 8. **Opcional:** texto para LinkedIn e currículo, e revisão com o professor.
 
 ## O que o senhor precisa fornecer
