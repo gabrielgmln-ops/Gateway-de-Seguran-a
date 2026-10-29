@@ -29,13 +29,20 @@ services:
     # serviços são acessados pelo nome na rede interna, e não por localhost.
     environment:
       GATEWAY_ADDR: ":8080"
-      LEDGER_URL: "http://ledger:9000"
-      PIX_URL: "http://pix:9000"
-      ANTIFRAUDE_URL: "http://antifraude:9000"
+      # Padrão: os mocks da rede interna. Para usar os serviços REAIS rodando no
+      # host, defina no .env, por exemplo, COMPOSE_LEDGER_URL=http://host.docker.internal:8081.
+      # As credenciais de serviço (LEDGER_USUARIO/LEDGER_SENHA) vêm do env_file.
+      LEDGER_URL: "${COMPOSE_LEDGER_URL:-http://ledger:9000}"
+      PIX_URL: "${COMPOSE_PIX_URL:-http://pix:9000}"
+      ANTIFRAUDE_URL: "${COMPOSE_ANTIFRAUDE_URL:-http://antifraude:9000}"
       REDIS_ADDR: "redis:6379"
       # sslmode=disable só é aceitável porque o banco está numa rede interna isolada.
       # Em produção, use sslmode=verify-full com certificado.
       DATABASE_URL: "postgres://gateway:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/seguranca?sslmode=disable"
+    # host.docker.internal já existe no Docker Desktop (Windows/macOS); esta linha
+    # garante o mesmo nome no Docker Engine do Linux (ex.: CI).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "/usr/local/bin/gateway", "healthcheck"]
       interval: 10s

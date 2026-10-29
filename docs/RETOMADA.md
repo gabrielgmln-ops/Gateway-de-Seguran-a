@@ -4,7 +4,7 @@ Nota de passagem da sessão do Claude Code na nuvem (28/10/2026) para a sessão 
 
 ## Estado atual
 
-**As Etapas 0 a 5 estão prontas e testadas na nuvem.** O código compila em Go 1.26 e 1.27, e os testes
+**As Etapas 0 a 6 estão prontas** (0 a 5 testadas na nuvem; 6 no PC, em 29/10/2026). O código compila em Go 1.26 e 1.27, e os testes
 passam com o detector de corrida (`-race`). A cobertura é de 95,0% com PostgreSQL real e de 90,2% sem ele.
 
 A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e PostgreSQL 16 locais, **sem Docker**:
@@ -28,7 +28,9 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
 | Docs | Nota de retomada | `6fed510` |
 | Docs | Repositório publicado no GitHub | `4f079b6` |
 | Fix | `golang.org/x/text` v0.43.0 (vulnerabilidade apontada pelo govulncheck) e actions v7 | `d50332b` |
-| Docs | Esta atualização da nota | último commit |
+| Docs | Retomada com o 1º CI | `e35cc86` |
+| Docs | CI verde, Docker testado no Windows, desbloqueio de IP corrigido | `501133e` |
+| 6 | Integração com serviços reais: rotas permitidas por serviço e credencial de serviço | último commit |
 
 ## Decisões tomadas
 
@@ -56,9 +58,19 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
 4. ~~Actions v7~~ ✅ funcionaram, nada a reverter.
 5. **Autoria dos 6 primeiros commits:** estão como `Claude <noreply@anthropic.com>`; só os últimos têm o autor Gabriel. O push já foi feito, então padronizar agora reescreve o histórico e exige `git push --force-with-lease` (decisão do senhor):
    `git rebase -r --root --exec "git commit --amend --no-edit --reset-author"` (com `user.name`/`user.email` já configurados).
-6. **Integração com os serviços reais** (próximo passo de valor): apontar `LEDGER_URL`, `PIX_URL` e `ANTIFRAUDE_URL` para os projetos reais, por exemplo `http://host.docker.internal:8081`.
-   - **Atenção:** a Ledger API recebeu HTTP Basic na Operação Cofre, e o gateway remove o `Authorization` antes de encaminhar. Será preciso decidir como o gateway se autentica em cada serviço, por exemplo com credenciais de serviço por variável de ambiente (`LEDGER_USUARIO` e `LEDGER_SENHA`) injetadas pelo proxy.
-   - Mapear os escopos para as rotas reais (`/api/v1/...`).
+6. ~~**Integração com os serviços reais**~~ ✅ Etapa 6 (29/10/2026), aprovada pelo senhor antes de codar:
+   - `internal/authz/policies.go` é o inventário único: 7 rotas da Ledger, 14 do Pix e 2 do Antifraude, cada
+     uma com seu escopo. O resto dá 404 (`/actuator`, Swagger, `/saude`, `/painel`); método errado, 405.
+   - `POST /pix/api/v1/qrcodes/leitura` e `/leitura/imagem` exigem só `pix:read` (só decodificam; exceção aprovada).
+   - `<SERVIÇO>_USUARIO`/`<SERVIÇO>_SENHA` (os dois ou nenhum). O proxy apaga o `Authorization` do cliente e
+     injeta o Basic de serviço; 401 do upstream com credencial vira 502 e um log com o usuário (sem a senha).
+   - Compose: `COMPOSE_LEDGER_URL` etc. trocam os mocks pelos serviços reais em `host.docker.internal`.
+   - Testado: `go test -race` verde (authz 100%, proxy 96%, config 96,8%) e Compose com mocks (rotas novas;
+     Basic sintético chegou só à Ledger; senha ausente dos logs).
+   - **Falta:** teste de fumaça com a Ledger, o Pix e o Antifraude reais rodando (não estavam no ar em 29/10) e
+     criar na Ledger uma conta de serviço própria para o gateway, com o menor papel possível.
+   - **Risco aceito:** todos os clientes aparecem para a Ledger como a mesma conta. A Ledger ainda não lê o
+     `X-Gateway-Client-ID`; enquanto isso, a posse dos objetos (BOLA) não é checada por cliente.
 7. ~~**Vault**~~ ✅ projeto (e o Pix Simulado, que faltava) no `MOC Projetos.md` em 28/10/2026.
 8. **Opcional:** texto para LinkedIn e currículo, e revisão com o professor.
 

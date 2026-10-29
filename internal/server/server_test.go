@@ -74,6 +74,7 @@ type options struct {
 	clientCapacity int64
 	maxBody        int64
 	trusted        string
+	ledgerAuth     *config.BasicAuth // credencial de serviço da Ledger (nil = sem)
 }
 
 func newEnv(t *testing.T, opt options) *env {
@@ -100,7 +101,7 @@ func newEnv(t *testing.T, opt options) *env {
 		MaxBodyBytes:    opt.maxBody,
 		UpstreamTimeout: 2 * time.Second,
 		Upstreams: []config.Upstream{
-			{Name: "ledger", URL: u}, {Name: "pix", URL: u}, {Name: "antifraude", URL: u},
+			{Name: "ledger", URL: u, Auth: opt.ledgerAuth}, {Name: "pix", URL: u}, {Name: "antifraude", URL: u},
 		},
 		RateIP:     config.RateLimit{Capacity: 1000, Refill: 1000},
 		RateOAuth:  config.RateLimit{Capacity: 1000, Refill: 1000},
@@ -221,12 +222,12 @@ func TestHealthAndReady(t *testing.T) {
 func TestFullFlowAndIdentityForwarding(t *testing.T) {
 	e := newEnv(t, options{})
 	tok := e.token(t, "app-ledger", ledgerSecret)
-	resp := e.do(t, "GET", "/ledger/contas/123", tok, nil, map[string]string{"X-Gateway-Client-ID": "admin"})
+	resp := e.do(t, "GET", "/ledger/api/v1/contas/123", tok, nil, map[string]string{"X-Gateway-Client-ID": "admin"})
 	if resp.StatusCode != 200 {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 	body := readJSON(t, resp)
-	if body["path"] != "/contas/123" || body["client_id"] != "app-ledger" || body["authorization"] != "" {
+	if body["path"] != "/api/v1/contas/123" || body["client_id"] != "app-ledger" || body["authorization"] != "" {
 		t.Errorf("encaminhamento incorreto: %v", body)
 	}
 	// Cabeçalhos de segurança (API8).
@@ -247,12 +248,15 @@ func TestAuthenticationAndAuthorization(t *testing.T) {
 		name, method, path, token string
 		want                      int
 	}{
-		{"sem token (API2)", "GET", "/ledger/contas", "", 401},
-		{"leitura permitida", "GET", "/ledger/contas", leitura, 200},
-		{"escrita negada (API5)", "POST", "/ledger/lancamentos", leitura, 403},
-		{"outro serviço negado", "GET", "/pix/chaves", leitura, 403},
-		{"método proibido", "TRACE", "/ledger/contas", leitura, 405},
+		{"sem token (API2)", "GET", "/ledger/api/v1/contas/1", "", 401},
+		{"leitura permitida", "GET", "/ledger/api/v1/contas/1", leitura, 200},
+		{"escrita negada (API5)", "POST", "/ledger/api/v1/transferencias", leitura, 403},
+		{"outro serviço negado", "GET", "/pix/api/v1/chaves", leitura, 403},
+		{"método proibido", "TRACE", "/ledger/api/v1/contas/1", leitura, 405},
 		{"rota inexistente", "GET", "/admin", leitura, 404},
+		{"rota interna não exposta (API9)", "GET", "/ledger/actuator/env", leitura, 404},
+		{"swagger da Ledger não exposto", "GET", "/ledger/v3/api-docs", leitura, 404},
+		{"prefixo sozinho", "GET", "/ledger", leitura, 404},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -270,7 +274,7 @@ func TestIPBlockAfterFailures(t *testing.T) {
 	e := newEnv(t, options{})
 	for i := 0; i < 3; i++ {
 		// X-Forwarded-For forjado não ajuda: sem proxy confiável, ele é ignorado.
-		e.do(t, "GET", "/ledger/contas", "token-falso", nil, map[string]string{"X-Forwarded-For": fmt.Sprintf("10.9.9.%d", i)})
+		e.do(t, "GET", "/ledger/api/v1/contas/1", "token-falso", nil, map[string]string{"X-Forwarded-For": fmt.Sprintf("10.9.9.%d", i)})
 	}
 	if e.sink.count(seclog.EventIPBlockTriggered) != 1 {
 		t.Fatalf("IP deveria ter sido bloqueado; eventos: %+v", e.sink.events)
@@ -296,7 +300,7 @@ func TestIPBlockAfterFailures(t *testing.T) {
 func TestTrustedProxyResolvesRealIP(t *testing.T) {
 	e := newEnv(t, options{trusted: "127.0.0.0/8"}) // o "load balancer" é o localhost
 	for i := 0; i < 3; i++ {
-		e.do(t, "GET", "/ledger/contas", "token-falso", nil, map[string]string{"X-Forwarded-For": "198.51.100.20"})
+		e.do(t, "GET", "/ledger/api/v1/contas/1", "token-falso", nil, map[string]string{"X-Forwarded-For": "198.51.100.20"})
 	}
 	ctx := t.Context()
 	if blocked, _, _ := e.block.IsBlocked(ctx, "198.51.100.20"); !blocked {
@@ -312,18 +316,18 @@ func TestRateLimitPerClient(t *testing.T) {
 	tok := e.token(t, "app-ledger", ledgerSecret)
 	codes := []int{}
 	for i := 0; i < 4; i++ {
-		codes = append(codes, e.do(t, "GET", "/ledger/contas", tok, nil, nil).StatusCode)
+		codes = append(codes, e.do(t, "GET", "/ledger/api/v1/contas/1", tok, nil, nil).StatusCode)
 	}
 	if fmt.Sprint(codes) != "[200 200 200 429]" {
 		t.Errorf("sequência = %v, esperado [200 200 200 429]", codes)
 	}
-	r := e.do(t, "GET", "/ledger/contas", tok, nil, nil)
+	r := e.do(t, "GET", "/ledger/api/v1/contas/1", tok, nil, nil)
 	if r.Header.Get("Retry-After") == "" || r.Header.Get("RateLimit-Remaining") != "0" {
 		t.Error("cabeçalhos de rate limit ausentes")
 	}
 	// Outro cliente não é afetado (baldes separados por client_id).
 	other := e.token(t, "app-leitura", leituraSecret)
-	if r := e.do(t, "GET", "/ledger/contas", other, nil, nil); r.StatusCode != 200 {
+	if r := e.do(t, "GET", "/ledger/api/v1/contas/1", other, nil, nil); r.StatusCode != 200 {
 		t.Errorf("outro cliente recebeu %d", r.StatusCode)
 	}
 }
@@ -345,7 +349,7 @@ func TestPathTraversalAndBodyLimit(t *testing.T) {
 	}
 
 	big := strings.NewReader(strings.Repeat("x", 1000))
-	if r := e.do(t, "POST", "/ledger/lancamentos", tok, big, nil); r.StatusCode != 413 {
+	if r := e.do(t, "POST", "/ledger/api/v1/depositos", tok, big, nil); r.StatusCode != 413 {
 		t.Errorf("corpo grande: status = %d, esperado 413", r.StatusCode)
 	}
 }
@@ -386,5 +390,24 @@ func TestRemoteIP(t *testing.T) {
 	r.RemoteAddr = "sem-porta"
 	if RemoteIP(r) != "sem-porta" {
 		t.Errorf("RemoteIP sem porta = %q", RemoteIP(r))
+	}
+}
+
+// A Ledger real exige HTTP Basic. O gateway apresenta a credencial de serviço, e o
+// Bearer do cliente nunca chega ao upstream.
+func TestServiceCredentialEndToEnd(t *testing.T) {
+	e := newEnv(t, options{ledgerAuth: &config.BasicAuth{Username: "svc-gateway", Password: "senha-servico"}})
+	tok := e.token(t, "app-ledger", ledgerSecret)
+	body := readJSON(t, e.do(t, "GET", "/ledger/api/v1/contas/1", tok, nil, nil))
+
+	req := &http.Request{Header: http.Header{"Authorization": {fmt.Sprint(body["authorization"])}}}
+	if u, p, ok := req.BasicAuth(); !ok || u != "svc-gateway" || p != "senha-servico" {
+		t.Errorf("a Ledger deveria receber o Basic de serviço; recebeu %v", body["authorization"])
+	}
+	if strings.Contains(fmt.Sprint(body["authorization"]), tok) {
+		t.Error("o token do cliente vazou para o upstream")
+	}
+	if body["client_id"] != "app-ledger" {
+		t.Errorf("a identidade do cliente deveria seguir em X-Gateway-Client-ID: %v", body["client_id"])
 	}
 }

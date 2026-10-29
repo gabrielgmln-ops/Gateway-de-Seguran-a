@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,6 +28,27 @@ import (
 type Upstream struct {
 	Name string   // prefixo da rota, ex.: "ledger" -> /ledger/*
 	URL  *url.URL // endereço interno do serviço; "*" indica um ponteiro (referência)
+
+	// Auth é a credencial de SERVIÇO que o gateway apresenta ao upstream.
+	// nil = o serviço não exige autenticação (ex.: Pix Simulado, mocks).
+	// O Authorization do cliente nunca segue adiante; quando o serviço exige
+	// login (a Ledger usa HTTP Basic), quem se autentica é o próprio gateway.
+	Auth *BasicAuth
+}
+
+// BasicAuth guarda usuário e senha de uma conta de serviço.
+//
+// Comparação com Python: o método String() abaixo é como o __repr__. Qualquer
+// fmt.Print/%v/%+v e o slog usam ele, então a senha nunca aparece num log,
+// mesmo que alguém imprima a struct Upstream inteira por descuido.
+type BasicAuth struct {
+	Username string
+	Password string
+}
+
+// String esconde a senha (OWASP API8: segredo fora de logs).
+func (b BasicAuth) String() string {
+	return fmt.Sprintf("BasicAuth{Username: %q, Password: \"***\"}", b.Username)
 }
 
 // Config agrupa todas as configurações do gateway.
@@ -120,8 +142,12 @@ func Load() (*Config, error) {
 			// "%w" embrulha o erro original, como "raise NovoErro() from err" no Python.
 			return nil, fmt.Errorf("%s inválida: %w", s.envVar, err)
 		}
+		creds, err := loadServiceAuth(s.name)
+		if err != nil {
+			return nil, err
+		}
 		// append() é o equivalente a lista.append(x), mas devolve o slice novo.
-		cfg.Upstreams = append(cfg.Upstreams, Upstream{Name: s.name, URL: u})
+		cfg.Upstreams = append(cfg.Upstreams, Upstream{Name: s.name, URL: u, Auth: creds})
 	}
 
 	// --- Autenticação ---
@@ -190,6 +216,25 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil // "nil" é o equivalente ao None do Python
+}
+
+// loadServiceAuth lê <SERVIÇO>_USUARIO e <SERVIÇO>_SENHA (ex.: LEDGER_USUARIO).
+// As duas vazias: o serviço não usa autenticação. Só uma preenchida: erro, porque
+// é quase certo um .env incompleto, e subir assim geraria 401 em toda chamada.
+func loadServiceAuth(service string) (*BasicAuth, error) {
+	prefix := strings.ToUpper(service) // "ledger" -> "LEDGER", como str.upper()
+	user := os.Getenv(prefix + "_USUARIO")
+	pass := os.Getenv(prefix + "_SENHA")
+	switch {
+	case user == "" && pass == "":
+		return nil, nil
+	case user == "" || pass == "":
+		return nil, fmt.Errorf("defina %s_USUARIO e %s_SENHA juntos (ou nenhum dos dois)", prefix, prefix)
+	case strings.Contains(user, ":"):
+		// No HTTP Basic, o ":" separa usuário de senha (RFC 7617 §2).
+		return nil, fmt.Errorf("%s_USUARIO não pode conter \":\"", prefix)
+	}
+	return &BasicAuth{Username: user, Password: pass}, nil
 }
 
 // loadRate lê <prefixo>_CAPACITY e <prefixo>_REFILL_PER_SEC.

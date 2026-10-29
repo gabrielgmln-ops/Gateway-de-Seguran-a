@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"gateway-seguranca/internal/auth"
+	"gateway-seguranca/internal/config"
 	"gateway-seguranca/internal/httpx"
 )
 
@@ -41,7 +42,7 @@ func mustURL(t *testing.T, raw string) *url.URL {
 
 func TestProxyStripsAndForwardsHeaders(t *testing.T) {
 	up := echoUpstream(t)
-	h := New("pix", mustURL(t, up.URL), 5*time.Second, discard())
+	h := New("pix", mustURL(t, up.URL), nil, 5*time.Second, discard())
 
 	r := httptest.NewRequest("GET", "/chaves", nil)
 	r.Header.Set("Authorization", "Bearer segredo")
@@ -110,7 +111,7 @@ func TestProxyErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := New("ledger", mustURL(t, tc.target), tc.timeout, discard())
+			h := New("ledger", mustURL(t, tc.target), nil, tc.timeout, discard())
 			r := httptest.NewRequest("POST", "/", tc.body)
 			rec := httptest.NewRecorder()
 			if tc.limit > 0 {
@@ -135,5 +136,85 @@ func TestProxyErrors(t *testing.T) {
 func TestHasAnyPrefix(t *testing.T) {
 	if !hasAnyPrefix("x-gateway-scopes", internalHeaderPrefixes) || hasAnyPrefix("X-Request-Id", internalHeaderPrefixes) {
 		t.Error("hasAnyPrefix incorreto")
+	}
+}
+
+// O upstream simulado faz o papel da Ledger: exige HTTP Basic e guarda o que recebeu.
+func basicUpstream(t *testing.T, user, pass string, got *string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*got = r.Header.Get("Authorization")
+		u, p, ok := r.BasicAuth()
+		if !ok || u != user || p != pass {
+			w.Header().Set("WWW-Authenticate", `Basic realm="ledger"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestProxyInjectsServiceCredential(t *testing.T) {
+	var got string
+	up := basicUpstream(t, "svc-gateway", "senha-servico", &got)
+	creds := &config.BasicAuth{Username: "svc-gateway", Password: "senha-servico"}
+	h := New("ledger", mustURL(t, up.URL), creds, 5*time.Second, discard())
+
+	// O cliente tenta se passar pelo gateway com um Basic próprio e um Bearer.
+	for _, clientAuth := range []string{"Bearer token-do-cliente", "Basic YWRtaW46YWRtaW4="} {
+		r := httptest.NewRequest("GET", "/api/v1/contas/1", nil)
+		r.Header.Set("Authorization", clientAuth)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, esperado 200", rec.Code)
+		}
+		req := &http.Request{Header: http.Header{"Authorization": {got}}}
+		if u, p, ok := req.BasicAuth(); !ok || u != "svc-gateway" || p != "senha-servico" {
+			t.Errorf("upstream recebeu %q; esperado só o Basic de serviço", got)
+		}
+	}
+}
+
+func TestProxyWithoutCredentialSendsNoAuthorization(t *testing.T) {
+	var got string
+	up := basicUpstream(t, "x", "y", &got)
+	h := New("pix", mustURL(t, up.URL), nil, 5*time.Second, discard())
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("Authorization", "Bearer token-do-cliente")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if got != "" {
+		t.Errorf("sem credencial configurada, nada deve seguir no Authorization; veio %q", got)
+	}
+	// Sem credencial de serviço, um 401 do upstream é legítimo e passa adiante.
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, esperado 401 repassado", rec.Code)
+	}
+}
+
+func TestProxyRejectedServiceCredentialBecomes502(t *testing.T) {
+	var got string
+	up := basicUpstream(t, "svc-gateway", "senha-certa", &got)
+	creds := &config.BasicAuth{Username: "svc-gateway", Password: "senha-errada"}
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	h := New("ledger", mustURL(t, up.URL), creds, 5*time.Second, logger)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/contas/1", nil))
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "upstream_unavailable") {
+		t.Fatalf("status = %d corpo = %s; esperado 502 genérico", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("WWW-Authenticate") != "" {
+		t.Error("o desafio Basic da Ledger não pode chegar ao cliente")
+	}
+	if !strings.Contains(logs.String(), "credencial de serviço recusada") || !strings.Contains(logs.String(), "svc-gateway") {
+		t.Errorf("o operador deveria ver o motivo no log: %s", logs.String())
+	}
+	if strings.Contains(logs.String(), "senha-errada") {
+		t.Error("a senha de serviço vazou no log")
 	}
 }

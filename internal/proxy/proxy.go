@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"gateway-seguranca/internal/auth"
+	"gateway-seguranca/internal/config"
 	"gateway-seguranca/internal/httpx"
 )
 
@@ -26,15 +27,23 @@ import (
 // usará esses cabeçalhos para repassar a identidade já validada (OWASP API1/API5).
 var internalHeaderPrefixes = []string{"X-Gateway-", "X-Internal-"}
 
+// errUpstreamAuth sinaliza que o serviço RECUSOU a credencial de serviço do gateway.
+// Comparação com Python: errors.New cria um valor de erro fixo, como uma
+// instância de exceção reaproveitável; o ErrorHandler o reconhece com errors.Is.
+var errUpstreamAuth = errors.New("serviço interno recusou a credencial do gateway")
+
 // leakyResponseHeaders revelam tecnologia/versão do serviço interno (OWASP API8).
 var leakyResponseHeaders = []string{"Server", "X-Powered-By", "X-Aspnet-Version"}
 
 // New cria o handler de proxy para um serviço.
 //
+// creds é a credencial de serviço (nil = o upstream não exige login). Com ela,
+// o gateway apaga o Authorization do cliente e coloca o PRÓPRIO, em HTTP Basic.
+//
 // Comparação com Python: http.Handler é uma "interface", um contrato com um
 // único método, ServeHTTP(w, r). É parecido com um Protocol do typing: qualquer
 // tipo que tenha esse método serve, sem precisar herdar de nada.
-func New(name string, target *url.URL, timeout time.Duration, logger *slog.Logger) http.Handler {
+func New(name string, target *url.URL, creds *config.BasicAuth, timeout time.Duration, logger *slog.Logger) http.Handler {
 	// Transport próprio com timeouts. O padrão do Go não tem timeout de resposta,
 	// então um serviço lento prenderia conexões do gateway para sempre (OWASP API4).
 	transport := &http.Transport{
@@ -89,6 +98,14 @@ func New(name string, target *url.URL, timeout time.Duration, logger *slog.Logge
 			// Se um serviço interno for comprometido, ele não terá tokens para reutilizar.
 			pr.Out.Header.Del("Authorization")
 
+			// A ORDEM importa: só DEPOIS de apagar o do cliente é que entra a
+			// credencial de serviço. Assim, nada que o cliente envie chega ao
+			// upstream como se fosse o gateway. SetBasicAuth monta
+			// "Basic base64(usuario:senha)", como requests.auth.HTTPBasicAuth.
+			if creds != nil {
+				pr.Out.SetBasicAuth(creds.Username, creds.Password)
+			}
+
 			// Repassa a identidade validada em cabeçalhos que só o gateway pode definir.
 			// Os serviços usam X-Gateway-Client-ID para checar a posse do objeto
 			// (ex.: a conta pertence a este cliente?), a defesa contra BOLA (OWASP API1).
@@ -105,6 +122,15 @@ func New(name string, target *url.URL, timeout time.Duration, logger *slog.Logge
 
 		// ModifyResponse permite ajustar a resposta do serviço antes de devolvê-la ao cliente.
 		ModifyResponse: func(resp *http.Response) error {
+			// 401 com credencial configurada = a conta de serviço está errada,
+			// expirada ou bloqueada (a Ledger bloqueia após falhas seguidas).
+			// O cliente não tem culpa nem como resolver: devolver o 401 só o
+			// confundiria e revelaria que há login atrás do gateway. Vira 502 e o
+			// operador vê o motivo no log.
+			if creds != nil && resp.StatusCode == http.StatusUnauthorized {
+				_ = resp.Body.Close()
+				return errUpstreamAuth
+			}
 			for _, h := range leakyResponseHeaders {
 				resp.Header.Del(h)
 			}
@@ -133,6 +159,15 @@ func New(name string, target *url.URL, timeout time.Duration, logger *slog.Logge
 			// O cliente desistiu (fechou a conexão): não há a quem responder.
 			if errors.Is(err, context.Canceled) {
 				logger.Info("cliente cancelou a requisição", "service", name, "request_id", reqID)
+				return
+			}
+
+			if errors.Is(err, errUpstreamAuth) {
+				// Só o usuário vai para o log; a senha, nunca.
+				logger.Error("credencial de serviço recusada pelo upstream; confira o .env",
+					"service", name, "request_id", reqID, "service_user", creds.Username)
+				httpx.WriteError(w, r, http.StatusBadGateway,
+					"upstream_unavailable", "serviço temporariamente indisponível")
 				return
 			}
 

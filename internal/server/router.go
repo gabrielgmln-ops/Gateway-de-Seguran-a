@@ -124,18 +124,24 @@ func NewRouter(d Deps) http.Handler {
 	// O inventário de rotas expostas fica explícito e centralizado aqui (OWASP API9).
 	for _, up := range d.Config.Upstreams {
 		prefix := "/" + up.Name
-		handler := proxy.New(up.Name, up.URL, d.Config.UpstreamTimeout, d.Logger)
+		handler := proxy.New(up.Name, up.URL, up.Auth, d.Config.UpstreamTimeout, d.Logger)
+		// Serviço sem política cadastrada fica com a lista vazia: tudo 404 (negar por padrão).
+		rules := authz.Policies[up.Name]
 
 		// r.Group cria um grupo de rotas que compartilha middlewares, sem mudar o prefixo.
 		r.Group(func(g chi.Router) {
 			g.Use(auth.RequireBearer(d.Tokens, d.Reporter))            // 1º autenticação: quem é você?
 			g.Use(rateLimit(d, d.ClientLimiter, ratelimit.ByClientID)) // 2º limite por cliente
-			g.Use(authz.RequireServiceScope(up.Name, d.Reporter))      // 3º autorização: pode fazer isto?
 			// Mount atende "/ledger" e "/ledger/*". StripPrefix remove "/ledger" antes de
-			// encaminhar, então GET /ledger/contas chega ao Ledger como GET /contas.
-			g.Mount(prefix, http.StripPrefix(prefix, handler))
+			// encaminhar, então GET /ledger/api/v1/contas/1 chega à Ledger como
+			// GET /api/v1/contas/1. A autorização roda DEPOIS do StripPrefix, para
+			// comparar a rota exatamente como o serviço a verá.
+			g.Mount(prefix, http.StripPrefix(prefix,
+				authz.RequireRoute(rules, d.Reporter)(handler))) // 3º autorização: rota e escopo
 		})
-		d.Logger.Info("rota de proxy registrada", "prefix", prefix, "upstream", up.URL.String())
+		// up.Auth != nil só diz SE há credencial; o valor nunca vai para o log.
+		d.Logger.Info("rota de proxy registrada", "prefix", prefix, "upstream", up.URL.String(),
+			"rotas_permitidas", len(rules), "credencial_de_servico", up.Auth != nil)
 	}
 
 	return r

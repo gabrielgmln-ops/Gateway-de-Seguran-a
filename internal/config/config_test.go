@@ -8,6 +8,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,11 @@ func setValidEnv(t *testing.T) {
 	t.Setenv("JWT_SECRET", strings.Repeat("a", 32))
 	t.Setenv("OAUTH_CLIENTS", `[{"client_id":"x"}]`)
 	t.Setenv("REDIS_ADDR", "localhost:6379")
+	// Zera as credenciais de serviço, para o teste não depender do ambiente da máquina.
+	for _, svc := range []string{"LEDGER", "PIX", "ANTIFRAUDE"} {
+		t.Setenv(svc+"_USUARIO", "")
+		t.Setenv(svc+"_SENHA", "")
+	}
 }
 
 func TestLoadDefaults(t *testing.T) {
@@ -98,5 +104,46 @@ func TestErrorDoesNotLeakSecret(t *testing.T) {
 	_, err := Load()
 	if err == nil || strings.Contains(err.Error(), "segredo-curto-123") {
 		t.Fatalf("a mensagem de erro não pode conter o segredo: %v", err)
+	}
+}
+
+func TestLoadServiceAuth(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("LEDGER_USUARIO", "svc-gateway")
+	t.Setenv("LEDGER_SENHA", "s3nha")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := cfg.Upstreams[0].Auth; a == nil || a.Username != "svc-gateway" || a.Password != "s3nha" {
+		t.Errorf("credencial da Ledger não carregada: %v", a)
+	}
+	if cfg.Upstreams[1].Auth != nil || cfg.Upstreams[2].Auth != nil {
+		t.Error("Pix e Antifraude não deveriam ter credencial")
+	}
+	// A senha não pode aparecer quando a struct é impressa (logs, %v, %+v).
+	if s := fmt.Sprintf("%v %+v", *cfg.Upstreams[0].Auth, cfg.Upstreams[0].Auth); strings.Contains(s, "s3nha") {
+		t.Errorf("senha vazou na formatação: %s", s)
+	}
+}
+
+func TestLoadServiceAuthInvalid(t *testing.T) {
+	cases := []struct{ user, pass string }{
+		{"svc-gateway", ""},
+		{"", "s3nha"},
+		{"svc:gateway", "s3nha"},
+	}
+	for _, tc := range cases {
+		setValidEnv(t)
+		t.Setenv("LEDGER_USUARIO", tc.user)
+		t.Setenv("LEDGER_SENHA", tc.pass)
+		_, err := Load()
+		if err == nil {
+			t.Errorf("usuario=%q senha vazia=%v deveria falhar", tc.user, tc.pass == "")
+			continue
+		}
+		if tc.pass != "" && strings.Contains(err.Error(), tc.pass) {
+			t.Error("a mensagem de erro não pode conter a senha")
+		}
 	}
 }
