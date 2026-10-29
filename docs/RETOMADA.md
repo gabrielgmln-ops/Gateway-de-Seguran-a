@@ -30,7 +30,8 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
 | Fix | `golang.org/x/text` v0.43.0 (vulnerabilidade apontada pelo govulncheck) e actions v7 | `d50332b` |
 | Docs | Retomada com o 1º CI | `e35cc86` |
 | Docs | CI verde, Docker testado no Windows, desbloqueio de IP corrigido | `501133e` |
-| 6 | Integração com serviços reais: rotas permitidas por serviço e credencial de serviço | último commit |
+| 6 | Integração com serviços reais: rotas permitidas por serviço e credencial de serviço | `ee63d4e` |
+| Teste | Teste de fumaça com Ledger, Pix e Antifraude reais (25/25) | último commit |
 
 ## Decisões tomadas
 
@@ -67,8 +68,13 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
    - Compose: `COMPOSE_LEDGER_URL` etc. trocam os mocks pelos serviços reais em `host.docker.internal`.
    - Testado: `go test -race` verde (authz 100%, proxy 96%, config 96,8%) e Compose com mocks (rotas novas;
      Basic sintético chegou só à Ledger; senha ausente dos logs).
-   - **Falta:** teste de fumaça com a Ledger, o Pix e o Antifraude reais rodando (não estavam no ar em 29/10) e
-     criar na Ledger uma conta de serviço própria para o gateway, com o menor papel possível.
+   - ✅ **Teste de fumaça com os serviços reais: 25/25** (29/10/2026), com `scripts/fumaca-servicos-reais.sh`.
+     O Pix também exige HTTP Basic: recebeu `PIX_USUARIO`/`PIX_SENHA` sem mudança de código. Conta de serviço
+     usada: a sintética "cliente" da Ledger (papel mínimo; a `/auditoria` responde 403, como esperado).
+     Achados: o bloqueio de IP pegou o próprio teste na 2ª execução (o roteiro agora zera os contadores) e o
+     `.env` do Pix aponta a Ledger para `localhost`, o que quebra no Docker (subir com
+     `LEDGER_BASE_URL=http://host.docker.internal:8081 docker compose up -d`).
+   - **Falta:** criar na Ledger uma conta de serviço própria para o gateway.
    - **Risco aceito:** todos os clientes aparecem para a Ledger como a mesma conta. A Ledger ainda não lê o
      `X-Gateway-Client-ID`; enquanto isso, a posse dos objetos (BOLA) não é checada por cliente.
 7. ~~**Vault**~~ ✅ projeto (e o Pix Simulado, que faltava) no `MOC Projetos.md` em 28/10/2026.

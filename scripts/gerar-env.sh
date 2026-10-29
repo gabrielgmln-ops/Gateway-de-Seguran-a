@@ -55,6 +55,9 @@ UPSTREAM_TIMEOUT=10s
 # conta só para o gateway, nunca a de uma pessoa. Defina as duas ou nenhuma.
 #LEDGER_USUARIO=
 #LEDGER_SENHA=
+# O Pix Simulado também exige HTTP Basic.
+#PIX_USUARIO=
+#PIX_SENHA=
 JWT_SECRET=$(rand)
 JWT_ISSUER=gateway-seguranca
 JWT_AUDIENCE=servicos-internos

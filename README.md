@@ -158,9 +158,15 @@ COMPOSE_ANTIFRAUDE_URL=http://host.docker.internal:8000
 LEDGER_USUARIO=<conta de serviço criada na Ledger só para o gateway>
 LEDGER_SENHA=<senha dessa conta>
 ```
-Qualquer serviço aceita `<SERVIÇO>_USUARIO`/`<SERVIÇO>_SENHA`; é preciso definir os dois ou nenhum, senão o
+O Pix Simulado também exige HTTP Basic: use `PIX_USUARIO`/`PIX_SENHA`. Qualquer serviço aceita `<SERVIÇO>_USUARIO`/`<SERVIÇO>_SENHA`; é preciso definir os dois ou nenhum, senão o
 gateway não sobe. Se o serviço recusar a credencial, o cliente recebe 502 e o log mostra
 `credencial de serviço recusada pelo upstream` com o usuário (nunca a senha).
+
+Com os três serviços no ar, o teste de fumaça faz 25 verificações (contas, depósito, chave Pix, pagamento
+liquidado na Ledger, rotas invisíveis, escopos negados):
+```bash
+bash scripts/fumaca-servicos-reais.sh   # 29/10/2026: 25 OK, 0 falha
+```
 
 ## Estrutura
 ```
