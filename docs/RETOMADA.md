@@ -74,7 +74,9 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
      Achados: o bloqueio de IP pegou o próprio teste na 2ª execução (o roteiro agora zera os contadores) e o
      `.env` do Pix aponta a Ledger para `localhost`, o que quebra no Docker (subir com
      `LEDGER_BASE_URL=http://host.docker.internal:8081 docker compose up -d`).
-   - **Falta:** criar na Ledger uma conta de serviço própria para o gateway.
+   - ✅ Conta de serviço própria: `svc-gateway` (papel CLIENTE), criada pelo seed `SEED_GATEWAY_*` da Ledger
+     (commit local na Ledger). Fumaça repetida com ela: 25/25. Conta de outro usuário da Ledger, lida pelo
+     gateway: 404.
    - **Risco aceito:** todos os clientes aparecem para a Ledger como a mesma conta. A Ledger ainda não lê o
      `X-Gateway-Client-ID`; enquanto isso, a posse dos objetos (BOLA) não é checada por cliente.
 7. ~~**Vault**~~ ✅ projeto (e o Pix Simulado, que faltava) no `MOC Projetos.md` em 28/10/2026.

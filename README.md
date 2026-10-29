@@ -155,8 +155,10 @@ Por padrão, o Compose encaminha para os mocks. Para usar os projetos reais roda
 COMPOSE_LEDGER_URL=http://host.docker.internal:8081
 COMPOSE_PIX_URL=http://host.docker.internal:8082
 COMPOSE_ANTIFRAUDE_URL=http://host.docker.internal:8000
-LEDGER_USUARIO=<conta de serviço criada na Ledger só para o gateway>
-LEDGER_SENHA=<senha dessa conta>
+LEDGER_USUARIO=svc-gateway          # criada pelo seed SEED_GATEWAY_* da Ledger (papel CLIENTE)
+LEDGER_SENHA=<a mesma de SEED_GATEWAY_SENHA>
+PIX_USUARIO=svc-gateway
+PIX_SENHA=<a mesma>
 ```
 O Pix Simulado também exige HTTP Basic: use `PIX_USUARIO`/`PIX_SENHA`. Qualquer serviço aceita `<SERVIÇO>_USUARIO`/`<SERVIÇO>_SENHA`; é preciso definir os dois ou nenhum, senão o
 gateway não sobe. Se o serviço recusar a credencial, o cliente recebe 502 e o log mostra
