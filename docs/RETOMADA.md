@@ -47,7 +47,7 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
 
 ## Pendências
 
-1. ~~**GitHub**~~ ✅ publicado em 28/10/2026 em https://github.com/gabrielgmln-ops/Gateway-de-Seguran-a (branch `main`). O bundle `gateway-seguranca-backup.bundle` fica só como cópia de segurança.
+1. ~~**GitHub**~~ ✅ publicado em 28/10/2026 em https://github.com/gabrielgmln-ops/gateway-seguranca (branch `main`). O bundle `gateway-seguranca-backup.bundle` fica só como cópia de segurança.
 2. ~~**Docker não testado**~~ ✅ testado no PC em 28/10/2026 (Docker 29.8): gateway, redis e postgres `healthy`
    sem mudar nada do endurecimento (Redis com `user: redis` + `read_only` funcionou). `/readyz` respondeu
    `{"postgres":"up","redis":"up"}` na porta 8083 e a demonstração do README passou inteira (200, 403 de escopo,
@@ -93,7 +93,7 @@ A validação de ponta a ponta foi feita na nuvem com os binários, Redis 7 e Po
 Pelo GitHub (preferido):
 
 ```bash
-git clone https://github.com/gabrielgmln-ops/Gateway-de-Seguran-a.git gateway-seguranca
+git clone https://github.com/gabrielgmln-ops/gateway-seguranca.git gateway-seguranca
 ```
 
 Ou, sem internet, a partir do bundle (tem os 8 primeiros commits; falta só esta atualização da nota):
@@ -101,6 +101,6 @@ Ou, sem internet, a partir do bundle (tem os 8 primeiros commits; falta só esta
 ```bash
 git clone gateway-seguranca-backup.bundle gateway-seguranca
 cd gateway-seguranca
-git remote set-url origin https://github.com/gabrielgmln-ops/Gateway-de-Seguran-a.git
+git remote set-url origin https://github.com/gabrielgmln-ops/gateway-seguranca.git
 git pull origin main
 ```
